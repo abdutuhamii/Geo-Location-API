@@ -9,51 +9,62 @@
     
     <body>
 
-        <button id="getLocationBtn">Get Coordinates</button>
+        <button id="location-btn">Location</button>
 
-        <p id="output">Click the button to see your location...</p>
+        <div id="output">Press the button to detect your closest form code.</div>
 
         <script>
-            const button = document.getElementById("getLocationBtn");
+
+            const button = document.getElementById("location-btn");
 
             const output = document.getElementById("output");
 
-            // Optional configuration settings
-            const options = {
-                enableHighAccuracy: true, // Forces device to use GPS if available (slower/uses more battery)
-                timeout: 5000,            // Give up after 5 seconds
-                maximumAge: 0             // Do not use a cached position; get a fresh one
-            };
+            const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybUHXglg1HXltgOF3AA0S-hlBxeE7H48zqKmGS-q-J2ZCCPP3MS0aEFjHYdCNzfTRc/exec";
 
             // Handles successful retrieval of location
-            function successCallback(position) {
-                const latitude = position.coords.latitude;
-                const longitude = position.coords.longitude;
-                const accuracy = position.coords.accuracy; // Accuracy in meters
+            async function successCallback(position) {
+                const payload = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                };
 
-                output.innerHTML = `
-                    <strong>Success!</strong><br>
-                    Latitude: ${latitude}°<br>
-                    Longitude: ${longitude}°<br>
-                    Accurate within: ${accuracy} meters
-                `;
+                output.textContent = "Connecting to Google Cloud Secure Engine...";
+
+                try {
+                    // Submit coordinates safely via POST
+                    const response = await fetch(GOOGLE_WEB_APP_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain' }, // Avoid CORS trigger issues with Apps Script
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) throw new Error("Cloud network error.");
+
+                    const data = await response.json();
+
+                    if(data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    output.innerHTML = `
+                        <span style="color: #0f9d58; font-weight: bold; font-size: 1.3rem;">Match Verified!</span><br><br>
+                        <strong>Form Code Assigned:</strong> ${data.formCode}<br>
+                        <small style="color: #777;">Proximity: ${data.distance.toFixed(2)} km</small>
+                    `;
+                } catch (err) {
+                    output.innerHTML = `<span style="color: red;">Error processing location matching:</span><br>${err.message}`;
+                } finally {
+                    button.disabled = false;
+                }
             }
 
             // Handles user denial or technical issues
             function failureCallback(error) {
-                switch(error.code) {
-                    case error.PERMISSION_DENIED:
-                        output.textContent = "User denied the request for Geolocation.";
-                        break;
-                    case error.POSITION_UNAVAILABLE:
-                        output.textContent = "Location information is unavailable.";
-                        break;
-                    case error.TIMEOUT:
-                        output.textContent = "The request to get user location timed out.";
-                        break;
-                    case error.UNKNOWN_ERROR:
-                        output.textContent = "An unknown error occurred.";
-                        break;
+                button.disabled = false;
+                if (error.code === error.PERMISSION_DENIED) {
+                    output.textContent = "Access denied. Please check your browser location configurations.";
+                } else {
+                    output.textContent = `GPS Sensor Error: ${error.message}`;
                 }
             }
 
@@ -64,11 +75,19 @@
                     return;
                 }
 
+                button.disabled = true;
                 output.textContent = "Locating...";
 
+                // Configuration settings
+                const geoOptions = {
+                    enableHighAccuracy: true, // Forces device to use GPS if available (slower/uses more battery)
+                    timeout: 10000,            // Give up after 5 seconds
+                    maximumAge: 0             // Do not use a cached position; get a fresh one
+                };
                 // 2. Request the current position
-                navigator.geolocation.getCurrentPosition(successCallback, failureCallback, options);
+                navigator.geolocation.getCurrentPosition(successCallback, failureCallback, geoOptions);
             });
+
         </script>
 
     </body>

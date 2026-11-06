@@ -116,161 +116,204 @@
 
   </div>
 
-  <script>
+  
+<script>
 
-    const button = document.getElementById("location-btn");
-    const output = document.getElementById("output");
+const button = document.getElementById("location-btn");
+const output = document.getElementById("output");
 
-    // Search radius in meters
-    const SEARCH_RADIUS = 50;
+// Your Google Apps Script Web App URL
+const GOOGLE_WEB_APP_URL =
+  "https://script.google.com/macros/s/AKfycbybUHXglg1HXltgOF3AA0S-hlBxeE7H48zqKmGS-q-J2ZCCPP3MS0aEFjHYdCNzfTRc/exec";
 
-    function showMessage(message, className = "") {
-      output.className = "";
-      output.replaceChildren();
+// Matching radius in meters
+const SEARCH_RADIUS = 50;
 
-      const element = document.createElement("div");
-      element.className = className;
-      element.textContent = message;
+let requestTimeout = null;
+let activeScript = null;
 
-      output.appendChild(element);
+function showMessage(message, className = "") {
+  output.className = className;
+  output.textContent = message;
+}
+
+function detectLocation() {
+
+  if (!navigator.geolocation) {
+    showMessage(
+      "Your browser does not support GPS.",
+      "error"
+    );
+    return;
+  }
+
+  button.disabled = true;
+  showMessage("Getting your current location...");
+
+  navigator.geolocation.getCurrentPosition(
+    successCallback,
+    failureCallback,
+    {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 0
     }
+  );
+}
 
-    function detectLocation() {
 
-      if (!navigator.geolocation) {
-        showMessage(
-          "Your browser does not support GPS location.",
-          "error"
-        );
-        return;
-      }
+// GPS successfully retrieved
+function successCallback(position) {
 
-      button.disabled = true;
-      showMessage("Getting your current location...");
+  const latitude = position.coords.latitude;
+  const longitude = position.coords.longitude;
 
-      const options = {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 0
-      };
+  showMessage("Connecting to Google Apps Script...");
 
-      navigator.geolocation.getCurrentPosition(
-        successCallback,
-        failureCallback,
-        options
-      );
-    }
+  // Clean up any previous request
+  cleanupRequest();
 
-    // GPS location successfully retrieved
-    function successCallback(position) {
+  // Create JSONP callback
+  window.handleLocationResponse = function(data) {
 
-      const latitude = position.coords.latitude;
-      const longitude = position.coords.longitude;
+    cleanupRequest();
 
-      showMessage("Checking nearest form code...");
-
-      google.script.run
-        .withSuccessHandler(displayResult)
-        .withFailureHandler(handleServerError)
-        .getNearestForm(
-          latitude,
-          longitude,
-          SEARCH_RADIUS
-        );
-    }
-
-    // Display server response
-    function displayResult(data) {
-
-      button.disabled = false;
-      output.replaceChildren();
-
-      if (!data || !data.success) {
-        showMessage("Invalid server response.", "error");
-        return;
-      }
-
-      if (data.isWithinRange) {
-
-        const title = document.createElement("div");
-        title.className = "success";
-        title.textContent = "✓ Match Verified!";
-
-        const label = document.createElement("div");
-        label.textContent = "Assigned Form Code:";
-
-        const code = document.createElement("div");
-        code.className = "code";
-        code.textContent = data.matchedForm;
-
-        const details = document.createElement("div");
-        details.className = "details";
-        details.textContent =
-          "Distance: " + data.closestDistanceMeters +
-          " meters | Allowed radius: " +
-          data.thresholdMeters + " meters";
-
-        output.append(title, label, code, details);
-
-      } else {
-
-        const title = document.createElement("div");
-        title.className = "error";
-        title.textContent = "Outside Allowed Range";
-
-        const details = document.createElement("div");
-        details.className = "details";
-
-        details.textContent =
-          "Closest form: " + data.closestForm +
-          " | Distance: " + data.closestDistanceMeters +
-          " meters | Allowed radius: " +
-          data.thresholdMeters + " meters";
-
-        output.append(title, details);
-      }
-    }
-
-    // Google Apps Script error
-    function handleServerError(error) {
-
-      button.disabled = false;
-
+    if (!data || !data.success) {
       showMessage(
-        "Server Error: " + error.message,
+        "Matching Error: " +
+        (data?.error || "Invalid response"),
         "error"
       );
+      return;
     }
 
-    // GPS errors
-    function failureCallback(error) {
+    displayResult(data);
+  };
 
-      button.disabled = false;
+  // Build API request URL
+  const params = new URLSearchParams({
+    latitude: latitude,
+    longitude: longitude,
+    radius: SEARCH_RADIUS,
+    callback: "handleLocationResponse"
+  });
 
-      let message = "Unable to retrieve your location.";
+  const script = document.createElement("script");
 
-      switch (error.code) {
+  activeScript = script;
 
-        case error.PERMISSION_DENIED:
-          message =
-            "Location access denied. Please allow location permission.";
-          break;
+  script.src = GOOGLE_WEB_APP_URL + "?" + params.toString();
 
-        case error.POSITION_UNAVAILABLE:
-          message =
-            "Your current GPS location is unavailable.";
-          break;
+  script.onerror = function() {
+    cleanupRequest();
 
-        case error.TIMEOUT:
-          message =
-            "Location request timed out. Please try again.";
-          break;
-      }
+    showMessage(
+      "Unable to connect to Google Apps Script. Check your deployment URL and access settings.",
+      "error"
+    );
+  };
 
-      showMessage(message, "error");
-    }
+  requestTimeout = setTimeout(function() {
+    cleanupRequest();
 
-  </script>
+    showMessage(
+      "Request timed out. Please try again.",
+      "error"
+    );
+  }, 20000);
+
+  document.body.appendChild(script);
+}
+
+
+// Clean up JSONP request
+function cleanupRequest() {
+
+  if (requestTimeout) {
+    clearTimeout(requestTimeout);
+    requestTimeout = null;
+  }
+
+  if (activeScript) {
+    activeScript.remove();
+    activeScript = null;
+  }
+
+  delete window.handleLocationResponse;
+  button.disabled = false;
+}
+
+
+// Display matching result
+function displayResult(data) {
+
+  output.replaceChildren();
+
+  if (data.isWithinRange) {
+
+    const title = document.createElement("div");
+    title.style.color = "#188038";
+    title.style.fontWeight = "bold";
+    title.style.fontSize = "22px";
+    title.textContent = "✓ Match Verified!";
+
+    const label = document.createElement("p");
+    label.textContent = "Assigned Form Code:";
+
+    const code = document.createElement("div");
+    code.style.fontSize = "30px";
+    code.style.fontWeight = "bold";
+    code.style.color = "#188038";
+    code.textContent = data.matchedForm;
+
+    const distance = document.createElement("p");
+    distance.textContent =
+      "Distance: " + data.closestDistanceMeters + " meters";
+
+    output.append(title, label, code, distance);
+
+  } else {
+
+    const title = document.createElement("div");
+    title.style.color = "#d93025";
+    title.style.fontWeight = "bold";
+    title.textContent = "Outside Allowed Range";
+
+    const details = document.createElement("p");
+    details.textContent =
+      "Closest form: " + data.closestForm +
+      " | Distance: " + data.closestDistanceMeters +
+      " meters" +
+      " | Allowed: " + data.thresholdMeters + " meters";
+
+    output.append(title, details);
+  }
+}
+
+
+// GPS failure
+function failureCallback(error) {
+
+  button.disabled = false;
+
+  const messages = {
+    1: "Location permission denied. Please allow GPS access.",
+    2: "GPS location is unavailable.",
+    3: "GPS request timed out. Please try again."
+  };
+
+  showMessage(
+    messages[error.code] || error.message,
+    "error"
+  );
+}
+
+
+// Connect button
+button.addEventListener("click", detectLocation);
+
+</script>
+
 
 </body>
 </html>

@@ -28,6 +28,15 @@
                     longitude: position.coords.longitude
                 };
 
+                // 🔴 NEW DEBUG LINE: See exactly what your browser sees
+                output.innerHTML = `
+                    <strong>DEBUGGING DEVICE DATA:</strong><br>
+                    Sent Lat: ${payload.latitude}<br>
+                    Sent Lng: ${payload.longitude}<br>
+                    Accuracy margin: ${position.coords.accuracy} meters<br><br>
+                    <em>Connecting to Google Cloud Secure Engine...</em>
+                `;
+
                 output.textContent = "Connecting to Google Cloud Secure Engine...";
 
                 try {

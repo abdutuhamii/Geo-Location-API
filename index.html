@@ -1,102 +1,128 @@
 <!DOCTYPE html>
 <html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checkpoint Location Matcher</title>
+</head>
+<body style="font-family: sans-serif; padding: 16px; max-width: 500px; margin: 0 auto; line-height: 1.5;">
 
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Document</title>
-    </head>
-    
-    <body>
+    <button id="location-btn" style="padding: 12px 20px; font-weight: bold; width: 100%; cursor: pointer;">
+        📍 Check My Location & Match Point
+    </button>
 
-        <button id="location-btn">Location</button>
+    <div id="output" style="margin-top: 16px; border: 1px solid #ccc; padding: 12px; border-radius: 6px; background: #fafafa;">
+        Press the button to detect your closest checkpoint.
+    </div>
 
-        <div id="output">Press the button to detect your closest form code.</div>
+    <script>
+        const button = document.getElementById("location-btn");
+        const output = document.getElementById("output");
+        const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybUHXglg1HXltgOF3AA0S-hlBxeE7H48zqKmGS-q-J2ZCCPP3MS0aEFjHYdCNzfTRc/exec";
 
-        <script>
+        async function successCallback(position) {
+            const userLat = position.coords.latitude;
+            const userLng = position.coords.longitude;
+            const accuracy = Math.round(position.coords.accuracy);
 
-            const button = document.getElementById("location-btn");
+            const payload = {
+                latitude: userLat,
+                longitude: userLng,
+                radiusMeters: 50 // Threshold in meters
+            };
 
-            const output = document.getElementById("output");
+            output.innerHTML = `
+                <strong>📡 Your Phone's Location:</strong><br>
+                Lat: <code>${userLat}</code><br>
+                Lng: <code>${userLng}</code><br>
+                Accuracy Margin: <strong>±${accuracy} meters</strong><br>
+                <a href="https://www.google.com/maps?q=${userLat},${userLng}" target="_blank">🗺️ Open Phone Location in Google Maps</a>
+                <br><br>
+                <em>Querying Google Sheet...</em>
+            `;
 
-            const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbybUHXglg1HXltgOF3AA0S-hlBxeE7H48zqKmGS-q-J2ZCCPP3MS0aEFjHYdCNzfTRc/exec";
+            try {
+                const response = await fetch(GOOGLE_WEB_APP_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify(payload)
+                });
 
-            // Handles successful retrieval of location
-            async function successCallback(position) {
-                const payload = {
-                    latitude: position.coords.latitude,
-                    longitude: position.coords.longitude,
-                    radiusMeters: 10 // Explicitly requests a 10-meter radius
-                };
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
 
-                output.innerHTML = `Device Lat: ${payload.latitude}<br>Device Lng: ${payload.longitude}<br>Accuracy: ±${Math.round(position.coords.accuracy)}m<br>Checking...`;
+                const point = data.selectedPoint || {};
+                const closestCode = point.formCode || data.closestForm || data.matchedForm || "Unknown";
+                const distMeters = data.closestDistanceMeters !== undefined ? data.closestDistanceMeters : "N/A";
+                const threshold = data.thresholdMeters || payload.radiusMeters;
+                const isMatch = data.isWithinRange;
 
-                try {
-                    const response = await fetch(GOOGLE_WEB_APP_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const data = await response.json();
-                    if (data.error) throw new Error(data.error);
-
-                    let breakdown = data.candidates ? data.candidates.map(c =>
-                        `${c.formCode}: ${c.distanceMeters}m away`
-                    ).join("<br>") : "";
-
-                    if (data.isWithinRange) {
-                        output.innerHTML = `
-                            MATCH VERIFIED (Within 10m)<br>
-                            Form: ${data.matchedForm}<br>
-                            Distance: ${data.closestDistanceMeters}m<br><br>
-                            All Checkpoints:<br>${breakdown}`;
-                    } else {
-                        output.innerHTML = `
-                            OUT OF RANGE (>10m)<br>
-                            Closest: ${data.closestForm} (${data.closestDistanceMeters}m away)<br>
-                            Required: Within ${data.thresholdMeters}m<br><br>
-                            All Checkpoints:<br>${breakdown}`;
-                    }
-                } catch (err) {
-                    output.innerHTML = `Error: ${err.message}`;
-                } finally {
-                    button.disabled = false;
+                // Build Selected Point HTML
+                let pointDetailsHTML = "";
+                if (point.latitude && point.longitude) {
+                    pointDetailsHTML = `
+                        <div style="background: #eef2f6; padding: 10px; border-radius: 6px; margin: 10px 0; border: 1px solid #cbd5e1;">
+                            <strong>🎯 Point Selected from Sheet:</strong><br>
+                            Form Code: <strong>${point.formCode}</strong><br>
+                            Sheet Lat: <code>${point.latitude}</code><br>
+                            Sheet Lng: <code>${point.longitude}</code><br>
+                            Distance from Phone: <strong>${distMeters} meters</strong><br>
+                            <a href="https://www.google.com/maps?q=${point.latitude},${point.longitude}" target="_blank" style="color: #0284c7; font-weight: bold;">
+                                📍 View Selected Sheet Point on Google Maps
+                            </a>
+                        </div>
+                    `;
                 }
-            }
 
-            // Handles user denial or technical issues
-            function failureCallback(error) {
-                button.disabled = false;
-                if (error.code === error.PERMISSION_DENIED) {
-                    output.textContent = "Access denied. Please check your browser location configurations.";
+                // All candidate points breakdown
+                let breakdown = "";
+                if (data.candidates && data.candidates.length > 0) {
+                    breakdown = data.candidates.map(c => 
+                        `&bull; <strong>${c.formCode}</strong>: ${c.distanceMeters}m away (${c.latitude}, ${c.longitude})`
+                    ).join("<br>");
+                }
+
+                if (isMatch) {
+                    output.innerHTML = `
+                        <span style="color: green; font-weight: bold; font-size: 1.2rem;">✅ MATCH VERIFIED!</span>
+                        ${pointDetailsHTML}
+                        <strong>All Registered Points in Sheet:</strong><br>
+                        ${breakdown}
+                    `;
                 } else {
-                    output.textContent = `GPS Sensor Error: ${error.message}`;
+                    output.innerHTML = `
+                        <span style="color: red; font-weight: bold; font-size: 1.2rem;">❌ OUT OF RANGE</span><br>
+                        <small>Closest point is further than the allowable radius (${threshold}m).</small>
+                        ${pointDetailsHTML}
+                        <strong>All Registered Points in Sheet:</strong><br>
+                        ${breakdown}
+                    `;
                 }
+            } catch (err) {
+                output.innerHTML = `<span style="color: red;">Error: ${err.message}</span>`;
+            } finally {
+                button.disabled = false;
             }
+        }
 
-            button.addEventListener("click", () => {
-                // 1. Check if the browser supports the Geolocation API
-                if (!navigator.geolocation) {
-                    output.textContent = "Geolocation is not supported by your browser.";
-                    return;
-                }
+        function failureCallback(error) {
+            button.disabled = false;
+            output.textContent = `GPS Error: ${error.message}`;
+        }
 
-                button.disabled = true;
-                output.textContent = "Locating...";
-
-                // Configuration settings
-                const geoOptions = {
-                    enableHighAccuracy: true, // Forces device to use GPS if available (slower/uses more battery)
-                    timeout: 10000,            // Give up after 5 seconds
-                    maximumAge: 0             // Do not use a cached position; get a fresh one
-                };
-                // 2. Request the current position
-                navigator.geolocation.getCurrentPosition(successCallback, failureCallback, geoOptions);
+        button.addEventListener("click", () => {
+            if (!navigator.geolocation) {
+                output.textContent = "Geolocation not supported.";
+                return;
+            }
+            button.disabled = true;
+            output.textContent = "Locating via device GPS...";
+            navigator.geolocation.getCurrentPosition(successCallback, failureCallback, {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
             });
-
-        </script>
-
-    </body>
-
+        });
+    </script>
+</body>
 </html>

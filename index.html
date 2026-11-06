@@ -25,43 +25,41 @@
             async function successCallback(position) {
                 const payload = {
                     latitude: position.coords.latitude,
-                    longitude: position.coords.longitude
+                    longitude: position.coords.longitude,
+                    radiusMeters: 10 // Explicitly requests a 10-meter radius
                 };
 
-                // 🔴 NEW DEBUG LINE: See exactly what your browser sees
-                output.innerHTML = `
-                    <strong>DEBUGGING DEVICE DATA:</strong><br>
-                    Sent Lat: ${payload.latitude}<br>
-                    Sent Lng: ${payload.longitude}<br>
-                    Accuracy margin: ${position.coords.accuracy} meters<br><br>
-                    <em>Connecting to Google Cloud Secure Engine...</em>
-                `;
-
-                output.textContent = "Connecting to Google Cloud Secure Engine...";
+                output.innerHTML = `Device Lat: ${payload.latitude}<br>Device Lng: ${payload.longitude}<br>Accuracy: ±${Math.round(position.coords.accuracy)}m<br>Checking...`;
 
                 try {
-                    // Submit coordinates safely via POST
                     const response = await fetch(GOOGLE_WEB_APP_URL, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'text/plain' }, // Avoid CORS trigger issues with Apps Script
+                        headers: { 'Content-Type': 'text/plain' },
                         body: JSON.stringify(payload)
                     });
 
-                    if (!response.ok) throw new Error("Cloud network error.");
-
                     const data = await response.json();
+                    if (data.error) throw new Error(data.error);
 
-                    if(data.error) {
-                        throw new Error(data.error);
+                    let breakdown = data.candidates ? data.candidates.map(c =>
+                        `${c.formCode}: ${c.distanceMeters}m away`
+                    ).join("<br>") : "";
+
+                    if (data.isWithinRange) {
+                        output.innerHTML = `
+                            MATCH VERIFIED (Within 10m)<br>
+                            Form: ${data.matchedForm}<br>
+                            Distance: ${data.closestDistanceMeters}m<br><br>
+                            All Checkpoints:<br>${breakdown}`;
+                    } else {
+                        output.innerHTML = `
+                            OUT OF RANGE (>10m)<br>
+                            Closest: ${data.closestForm} (${data.closestDistanceMeters}m away)<br>
+                            Required: Within ${data.thresholdMeters}m<br><br>
+                            All Checkpoints:<br>${breakdown}`;
                     }
-
-                    output.innerHTML = `
-                        <span style="color: #0f9d58; font-weight: bold; font-size: 1.3rem;">Match Verified!</span><br><br>
-                        <strong>Form Code Assigned:</strong> ${data.formCode}<br>
-                        <small style="color: #777;">Proximity: ${data.distance.toFixed(2)} km</small>
-                    `;
                 } catch (err) {
-                    output.innerHTML = `<span style="color: red;">Error processing location matching:</span><br>${err.message}`;
+                    output.innerHTML = `Error: ${err.message}`;
                 } finally {
                     button.disabled = false;
                 }

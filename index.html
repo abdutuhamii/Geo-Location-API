@@ -6,30 +6,31 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <title>Location Form Code Detector</title>
+  <title>Patrol Checkpoint Verification</title>
 
   <style>
+
     * {
       box-sizing: border-box;
     }
 
     body {
       font-family: Arial, sans-serif;
-      background: #f3f5f9;
+      background: #f1f3f6;
+      margin: 0;
+      min-height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
-      min-height: 100vh;
-      margin: 0;
       padding: 20px;
     }
 
     .container {
       background: white;
       width: 100%;
-      max-width: 420px;
+      max-width: 440px;
       padding: 30px;
-      border-radius: 16px;
+      border-radius: 18px;
       text-align: center;
       box-shadow: 0 5px 25px rgba(0,0,0,0.08);
     }
@@ -39,21 +40,23 @@
       margin-top: 0;
     }
 
-    p {
+    .description {
       color: #666;
-      line-height: 1.5;
+      line-height: 1.6;
+      font-size: 15px;
     }
 
     button {
+      width: 100%;
+      padding: 16px;
+      margin-top: 20px;
+      border: none;
+      border-radius: 9px;
       background: #188038;
       color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 15px 25px;
       font-size: 16px;
+      font-weight: bold;
       cursor: pointer;
-      width: 100%;
-      margin-top: 15px;
     }
 
     button:disabled {
@@ -62,17 +65,17 @@
     }
 
     #output {
-      margin-top: 25px;
-      padding: 15px;
-      border-radius: 8px;
+      margin-top: 22px;
+      padding: 18px;
       background: #f8f9fa;
+      border-radius: 10px;
+      line-height: 1.6;
       overflow-wrap: anywhere;
     }
 
     .success {
       color: #188038;
       font-weight: bold;
-      font-size: 20px;
     }
 
     .error {
@@ -80,19 +83,32 @@
       font-weight: bold;
     }
 
-    .code {
-      font-size: 30px;
+    .form-code {
+      font-size: 34px;
       font-weight: bold;
       color: #188038;
       margin: 12px 0;
     }
 
     .details {
-      font-size: 14px;
+      font-size: 13px;
       color: #666;
-      line-height: 1.8;
+      margin-top: 10px;
     }
+
+    .progress {
+      color: #1967d2;
+      font-weight: bold;
+    }
+
+    .small {
+      font-size: 12px;
+      color: #777;
+      margin-top: 15px;
+    }
+
   </style>
+
 </head>
 
 <body>
@@ -101,219 +117,497 @@
 
     <h2>Location Detection</h2>
 
-    <p>
-      Press the button below to detect your nearest
-      registered form code.
+    <p class="description">
+      Reach the designated patrol location and press
+      the button to verify your checkpoint.
     </p>
 
-    <button id="location-btn" onclick="detectLocation()">
+    <button id="location-btn">
       📍 Detect My Location
     </button>
 
     <div id="output" aria-live="polite">
-      Press the button to start.
+      Ready to verify your patrol location.
+    </div>
+
+    <div class="small">
+      Required GPS accuracy: 5 meters or better.
+      <br>
+      Maximum checkpoint distance: 5 meters.
     </div>
 
   </div>
 
-  
+
 <script>
 
-const button = document.getElementById("location-btn");
-const output = document.getElementById("output");
+// ======================================
+// CONFIGURATION
+// ======================================
 
-// Your Google Apps Script Web App URL
 const GOOGLE_WEB_APP_URL =
   "https://script.google.com/macros/s/AKfycbybUHXglg1HXltgOF3AA0S-hlBxeE7H48zqKmGS-q-J2ZCCPP3MS0aEFjHYdCNzfTRc/exec";
 
-// Matching radius in meters
-const SEARCH_RADIUS = 50;
+const MAX_GPS_ACCURACY = 5;
 
-let requestTimeout = null;
+const MAX_WAIT_TIME = 60000;
+
+
+// ======================================
+// ELEMENTS
+// ======================================
+
+const button =
+  document.getElementById("location-btn");
+
+const output =
+  document.getElementById("output");
+
+
+// ======================================
+// STATE
+// ======================================
+
+let watchId = null;
+let gpsTimer = null;
+let apiTimer = null;
 let activeScript = null;
 
+let isProcessing = false;
+
+
+// ======================================
+// DISPLAY MESSAGE
+// ======================================
+
 function showMessage(message, className = "") {
+
   output.className = className;
   output.textContent = message;
+
 }
+
+
+// ======================================
+// CLEANUP GPS
+// ======================================
+
+function stopGPS() {
+
+  if (watchId !== null) {
+
+    navigator.geolocation.clearWatch(watchId);
+
+    watchId = null;
+
+  }
+
+  if (gpsTimer !== null) {
+
+    clearTimeout(gpsTimer);
+
+    gpsTimer = null;
+
+  }
+
+}
+
+
+// ======================================
+// CLEANUP API
+// ======================================
+
+function cleanupAPI() {
+
+  if (apiTimer !== null) {
+
+    clearTimeout(apiTimer);
+
+    apiTimer = null;
+
+  }
+
+  if (activeScript) {
+
+    activeScript.remove();
+
+    activeScript = null;
+
+  }
+
+  delete window.handleLocationResponse;
+
+}
+
+
+// ======================================
+// RESET
+// ======================================
+
+function resetSystem() {
+
+  stopGPS();
+
+  cleanupAPI();
+
+  isProcessing = false;
+
+  button.disabled = false;
+
+}
+
+
+// ======================================
+// START LOCATION DETECTION
+// ======================================
 
 function detectLocation() {
 
+  if (isProcessing) return;
+
   if (!navigator.geolocation) {
+
     showMessage(
       "Your browser does not support GPS.",
       "error"
     );
+
     return;
+
   }
 
-  button.disabled = true;
-  showMessage("Getting your current location...");
+  resetSystem();
 
-  navigator.geolocation.getCurrentPosition(
-    successCallback,
-    failureCallback,
+  isProcessing = true;
+
+  button.disabled = true;
+
+  showMessage(
+    "Searching for an accurate GPS signal...",
+    "progress"
+  );
+
+  gpsTimer = setTimeout(function() {
+
+    stopGPS();
+
+    showMessage(
+      "GPS accuracy did not reach 5 meters within 60 seconds. Please move to an open area and try again.",
+      "error"
+    );
+
+    isProcessing = false;
+
+    button.disabled = false;
+
+  }, MAX_WAIT_TIME);
+
+
+  watchId = navigator.geolocation.watchPosition(
+
+    successGPS,
+
+    gpsError,
+
     {
       enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0
+      maximumAge: 0,
+      timeout: 60000
     }
+
   );
+
 }
 
 
-// GPS successfully retrieved
-function successCallback(position) {
+// ======================================
+// GPS SUCCESS
+// ======================================
 
-  const latitude = position.coords.latitude;
-  const longitude = position.coords.longitude;
+function successGPS(position) {
 
-  showMessage("Connecting to Google Apps Script...");
+  if (!isProcessing) return;
 
-  // Clean up any previous request
-  cleanupRequest();
+  const latitude =
+    position.coords.latitude;
 
-  // Create JSONP callback
-  window.handleLocationResponse = function(data) {
+  const longitude =
+    position.coords.longitude;
 
-    cleanupRequest();
+  const accuracy =
+    position.coords.accuracy;
 
-    if (!data || !data.success) {
-      showMessage(
-        "Matching Error: " +
-        (data?.error || "Invalid response"),
-        "error"
-      );
-      return;
-    }
+
+  // Reject inaccurate readings
+  if (accuracy > MAX_GPS_ACCURACY) {
+
+    showMessage(
+      "Improving GPS accuracy... Current accuracy: " +
+      accuracy.toFixed(1) +
+      " meters. Required: 5 meters or better.",
+      "progress"
+    );
+
+    return;
+
+  }
+
+
+  // Stop GPS collection after acceptable reading
+  stopGPS();
+
+  showMessage(
+    "GPS accuracy achieved. Checking patrol checkpoint...",
+    "progress"
+  );
+
+
+  // Send GPS to Google Apps Script
+  verifyCheckpoint(
+    latitude,
+    longitude,
+    accuracy
+  );
+
+}
+
+
+// ======================================
+// GPS ERROR
+// ======================================
+
+function gpsError(error) {
+
+  if (!isProcessing) return;
+
+  let message;
+
+  switch (error.code) {
+
+    case error.PERMISSION_DENIED:
+
+      message =
+        "Location permission denied. Please enable GPS access.";
+
+      break;
+
+    case error.POSITION_UNAVAILABLE:
+
+      message =
+        "GPS signal unavailable. Please try again outdoors.";
+
+      break;
+
+    case error.TIMEOUT:
+
+      message =
+        "GPS request timed out. Please try again.";
+
+      break;
+
+    default:
+
+      message =
+        "Unable to retrieve GPS location.";
+
+  }
+
+  resetSystem();
+
+  showMessage(message, "error");
+
+}
+
+
+// ======================================
+// GOOGLE APPS SCRIPT CONNECTION
+// ======================================
+
+function verifyCheckpoint(
+  latitude,
+  longitude,
+  accuracy
+) {
+
+  const callbackName =
+    "handleLocationResponse";
+
+  window[callbackName] = function(data) {
+
+    cleanupAPI();
+
+    isProcessing = false;
+
+    button.disabled = false;
 
     displayResult(data);
+
   };
 
-  // Build API request URL
+
   const params = new URLSearchParams({
+
     latitude: latitude,
+
     longitude: longitude,
-    radius: SEARCH_RADIUS,
-    callback: "handleLocationResponse"
+
+    accuracy: accuracy,
+
+    callback: callbackName
+
   });
+
 
   const script = document.createElement("script");
 
   activeScript = script;
 
-  script.src = GOOGLE_WEB_APP_URL + "?" + params.toString();
+  script.src =
+    GOOGLE_WEB_APP_URL +
+    "?" +
+    params.toString();
+
 
   script.onerror = function() {
-    cleanupRequest();
+
+    cleanupAPI();
+
+    isProcessing = false;
+
+    button.disabled = false;
 
     showMessage(
-      "Unable to connect to Google Apps Script. Check your deployment URL and access settings.",
+      "Could not connect to Google Apps Script. Check your deployment URL and access settings.",
       "error"
     );
+
   };
 
-  requestTimeout = setTimeout(function() {
-    cleanupRequest();
+
+  apiTimer = setTimeout(function() {
+
+    cleanupAPI();
+
+    isProcessing = false;
+
+    button.disabled = false;
 
     showMessage(
-      "Request timed out. Please try again.",
+      "Google Apps Script request timed out. Please try again.",
       "error"
     );
+
   }, 20000);
 
+
   document.body.appendChild(script);
+
 }
 
 
-// Clean up JSONP request
-function cleanupRequest() {
+// ======================================
+// DISPLAY VERIFICATION RESULT
+// ======================================
 
-  if (requestTimeout) {
-    clearTimeout(requestTimeout);
-    requestTimeout = null;
-  }
-
-  if (activeScript) {
-    activeScript.remove();
-    activeScript = null;
-  }
-
-  delete window.handleLocationResponse;
-  button.disabled = false;
-}
-
-
-// Display matching result
 function displayResult(data) {
 
   output.replaceChildren();
 
-  if (data.isWithinRange) {
+  if (!data || !data.success) {
+
+    showMessage(
+      "Verification error: " +
+      (data?.error || "Invalid server response"),
+      "error"
+    );
+
+    return;
+
+  }
+
+
+  if (data.verified) {
 
     const title = document.createElement("div");
-    title.style.color = "#188038";
-    title.style.fontWeight = "bold";
-    title.style.fontSize = "22px";
-    title.textContent = "✓ Match Verified!";
 
-    const label = document.createElement("p");
-    label.textContent = "Assigned Form Code:";
+    title.className = "success";
+
+    title.textContent =
+      "✓ CHECKPOINT VERIFIED";
+
+
+    const label = document.createElement("div");
+
+    label.textContent =
+      "Verified Form Code";
+
 
     const code = document.createElement("div");
-    code.style.fontSize = "30px";
-    code.style.fontWeight = "bold";
-    code.style.color = "#188038";
-    code.textContent = data.matchedForm;
 
-    const distance = document.createElement("p");
-    distance.textContent =
-      "Distance: " + data.closestDistanceMeters + " meters";
+    code.className = "form-code";
 
-    output.append(title, label, code, distance);
+    code.textContent =
+      data.formCode;
+
+
+    const details = document.createElement("div");
+
+    details.className = "details";
+
+    details.textContent =
+      "Distance: " +
+      data.distanceMeters.toFixed(2) +
+      " meters | GPS accuracy: " +
+      data.gpsAccuracyMeters.toFixed(1) +
+      " meters";
+
+
+    output.append(
+      title,
+      label,
+      code,
+      details
+    );
 
   } else {
 
     const title = document.createElement("div");
-    title.style.color = "#d93025";
-    title.style.fontWeight = "bold";
-    title.textContent = "Outside Allowed Range";
 
-    const details = document.createElement("p");
+    title.className = "error";
+
+    title.textContent =
+      "✕ CHECKPOINT NOT VERIFIED";
+
+
+    const details = document.createElement("div");
+
+    details.className = "details";
+
     details.textContent =
-      "Closest form: " + data.closestForm +
-      " | Distance: " + data.closestDistanceMeters +
-      " meters" +
-      " | Allowed: " + data.thresholdMeters + " meters";
+      "Nearest checkpoint: " +
+      data.closestFormCode +
+      " | Distance: " +
+      data.distanceMeters.toFixed(2) +
+      " meters. Required: 5 meters or less.";
+
 
     output.append(title, details);
+
   }
+
 }
 
 
-// GPS failure
-function failureCallback(error) {
+// ======================================
+// BUTTON
+// ======================================
 
-  button.disabled = false;
-
-  const messages = {
-    1: "Location permission denied. Please allow GPS access.",
-    2: "GPS location is unavailable.",
-    3: "GPS request timed out. Please try again."
-  };
-
-  showMessage(
-    messages[error.code] || error.message,
-    "error"
-  );
-}
-
-
-// Connect button
-button.addEventListener("click", detectLocation);
+button.addEventListener(
+  "click",
+  detectLocation
+);
 
 </script>
-
 
 </body>
 </html>

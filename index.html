@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Document</title>
+    </head>
+    
+    <body>
+
+        <button id="getLocationBtn">Get Coordinates</button>
+
+        <p id="output">Click the button to see your location...</p>
+
+        <script>
+            const button = document.getElementById("getLocationBtn");
+
+            const output = document.getElementById("output");
+
+            // Optional configuration settings
+            const options = {
+                enableHighAccuracy: true, // Forces device to use GPS if available (slower/uses more battery)
+                timeout: 5000,            // Give up after 5 seconds
+                maximumAge: 0             // Do not use a cached position; get a fresh one
+            };
+
+            // Handles successful retrieval of location
+            function successCallback(position) {
+                const latitude = position.coords.latitude;
+                const longitude = position.coords.longitude;
+                const accuracy = position.coords.accuracy; // Accuracy in meters
+
+                output.innerHTML = `
+                    <strong>Success!</strong><br>
+                    Latitude: ${latitude}°<br>
+                    Longitude: ${longitude}°<br>
+                    Accurate within: ${accuracy} meters
+                `;
+            }
+
+            // Handles user denial or technical issues
+            function failureCallback(error) {
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        output.textContent = "User denied the request for Geolocation.";
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        output.textContent = "Location information is unavailable.";
+                        break;
+                    case error.TIMEOUT:
+                        output.textContent = "The request to get user location timed out.";
+                        break;
+                    case error.UNKNOWN_ERROR:
+                        output.textContent = "An unknown error occurred.";
+                        break;
+                }
+            }
+
+            button.addEventListener("click", () => {
+                // 1. Check if the browser supports the Geolocation API
+                if (!navigator.geolocation) {
+                    output.textContent = "Geolocation is not supported by your browser.";
+                    return;
+                }
+
+                output.textContent = "Locating...";
+
+                // 2. Request the current position
+                navigator.geolocation.getCurrentPosition(successCallback, failureCallback, options);
+            });
+        </script>
+
+    </body>
+
+</html>
